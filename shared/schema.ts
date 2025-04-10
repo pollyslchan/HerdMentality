@@ -1,4 +1,5 @@
 import { pgTable, text, serial, integer, boolean, timestamp } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -119,3 +120,28 @@ export interface GameWithDetails extends Game {
   rounds: RoundWithDetails[];
   currentQuestion?: Question;
 }
+
+// Define all relations after all tables are declared
+export const gamesRelations = relations(games, ({ many }) => ({
+  players: many(players),
+  rounds: many(rounds),
+}));
+
+export const playersRelations = relations(players, ({ one }) => ({
+  game: one(games, { fields: [players.gameId], references: [games.id] }),
+}));
+
+export const questionsRelations = relations(questions, ({ many }) => ({
+  rounds: many(rounds),
+}));
+
+export const roundsRelations = relations(rounds, ({ one, many }) => ({
+  game: one(games, { fields: [rounds.gameId], references: [games.id] }),
+  question: one(questions, { fields: [rounds.questionId], references: [questions.id] }),
+  answers: many(answers),
+}));
+
+export const answersRelations = relations(answers, ({ one }) => ({
+  round: one(rounds, { fields: [answers.roundId], references: [rounds.id] }),
+  player: one(players, { fields: [answers.playerId], references: [players.id] }),
+}));
