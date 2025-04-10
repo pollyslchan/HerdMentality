@@ -10,6 +10,7 @@ import {
   type GameWithDetails,
 } from '@shared/schema';
 import { getRandomQuestions } from './gameQuestions';
+import { webSocketService } from './websocketContext';
 
 // Player colors for the game
 export const PLAYER_COLORS = [
@@ -83,6 +84,57 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const hasEveryoneAnswered = players.length > 0 && 
     players.every(player => player.hasSubmitted);
   
+  // Set up WebSocket listener for real-time updates
+  useEffect(() => {
+    if (!gameId) return;
+    
+    // Connect to WebSocket
+    webSocketService.connect();
+    
+    // Join the game room
+    webSocketService.joinGame(gameId);
+    
+    // Add message listener
+    const handleWebSocketMessage = (message: any) => {
+      if (message.type === 'game_update' && message.gameId === gameId) {
+        // Handle different types of game updates
+        const { data } = message;
+        
+        if (data?.action === 'player_joined') {
+          toast({
+            title: "New Player",
+            description: `${data.playerName} has joined the game!`,
+          });
+          refreshGameState();
+        } 
+        else if (data?.action === 'answer_submitted') {
+          refreshGameState();
+        }
+        else if (data?.action === 'round_processed') {
+          refreshGameState();
+          setLocation('/results');
+        }
+        else if (data?.action === 'next_round') {
+          refreshGameState();
+          setLocation('/question');
+          startTimer(30);
+        }
+        else if (data?.action === 'game_reset') {
+          refreshGameState();
+          setLocation('/question');
+          startTimer(30);
+        }
+      }
+    };
+    
+    webSocketService.addMessageListener(handleWebSocketMessage);
+    
+    // Clean up on unmount
+    return () => {
+      webSocketService.disconnect();
+    };
+  }, [gameId]);
+  
   // Timer functions
   const startTimer = (seconds = 30) => {
     stopTimer();
@@ -129,7 +181,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setError(null);
     
     try {
-      const response = await apiRequest('GET', `/api/games/${gameId}`);
+      const response = await apiRequest(`/api/games/${gameId}`);
       const gameData = await response.json();
       setGame(gameData);
     } catch (err) {
@@ -150,7 +202,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setError(null);
     
     try {
-      const response = await apiRequest('POST', '/api/games', { totalRounds });
+      const response = await apiRequest('/api/games', {
+        method: 'POST',
+        data: { totalRounds }
+      });
       const gameData = await response.json();
       setGameId(gameData.id);
       await refreshGameState();
@@ -176,11 +231,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setError(null);
     
     try {
-      await apiRequest('POST', '/api/players', {
-        gameId,
-        name,
-        color: PLAYER_COLORS[playerIndex % PLAYER_COLORS.length],
-        order: playerIndex + 1
+      await apiRequest('/api/players', {
+        method: 'POST', 
+        data: {
+          gameId,
+          name,
+          color: PLAYER_COLORS[playerIndex % PLAYER_COLORS.length],
+          order: playerIndex + 1
+        }
       });
       await refreshGameState();
     } catch (err) {
@@ -213,12 +271,22 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setError(null);
     
     try {
-      await apiRequest('POST', '/api/answers', {
-        roundId: currentRound.id,
-        playerId,
-        text: answer
+      await apiRequest('/api/answers', {
+        method: 'POST',
+        data: {
+          roundId: currentRound.id,
+          playerId,
+          text: answer
+        }
       });
       await refreshGameState();
+      
+      // Send WebSocket notification
+      webSocketService.sendGameUpdate(gameId, {
+        action: 'answer_submitted',
+        playerId,
+        roundId: currentRound.id
+      });
       
       // If all players have answered, process the round
       if (players.length > 0 && players.filter(p => p.hasSubmitted).length === players.length - 1) {
@@ -248,8 +316,17 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setError(null);
     
     try {
-      await apiRequest('POST', `/api/rounds/${currentRound.id}/process`);
+      await apiRequest(`/api/rounds/${currentRound.id}/process`, {
+        method: 'POST'
+      });
       await refreshGameState();
+      
+      // Send WebSocket notification
+      webSocketService.sendGameUpdate(gameId, {
+        action: 'round_processed',
+        roundId: currentRound.id
+      });
+      
       setLocation('/results');
     } catch (err) {
       setError('Failed to process round answers');
@@ -272,8 +349,17 @@ export function GameProvider({ children }: { children: ReactNode }) {
     
     try {
       if (currentRound < totalRounds) {
-        await apiRequest('POST', `/api/games/${gameId}/next-round`);
+        await apiRequest(`/api/games/${gameId}/next-round`, {
+          method: 'POST'
+        });
         await refreshGameState();
+        
+        // Send WebSocket notification
+        webSocketService.sendGameUpdate(gameId, {
+          action: 'next_round',
+          currentRound: currentRound + 1
+        });
+        
         setLocation('/question');
         startTimer(30);
       } else {
@@ -300,8 +386,16 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setError(null);
     
     try {
-      await apiRequest('POST', `/api/games/${gameId}/reset`);
+      await apiRequest(`/api/games/${gameId}/reset`, {
+        method: 'POST'
+      });
       await refreshGameState();
+      
+      // Send WebSocket notification
+      webSocketService.sendGameUpdate(gameId, {
+        action: 'game_reset'
+      });
+      
       setLocation('/question');
       startTimer(30);
     } catch (err) {
