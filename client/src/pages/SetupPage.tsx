@@ -124,8 +124,17 @@ export default function SetupPage() {
         playerIndex: nextPlayerIndex
       });
       
-      // Start the game for this player
-      startGame();
+      // Enter waiting room instead of starting the game immediately
+      setShowWaitingRoom(true);
+      setGameCode(existingGameData?.gameCode || '');
+      
+      // Set up regular refreshes of the game state to see new players
+      const intervalId = setInterval(() => {
+        refreshGameState();
+      }, 2000);
+      
+      // Clean up the interval when the component unmounts
+      return () => clearInterval(intervalId);
     } catch (error) {
       console.error('Failed to join game:', error);
       toast({
