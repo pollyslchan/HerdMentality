@@ -8,10 +8,17 @@ async function throwIfResNotOk(res: Response) {
 }
 
 export async function apiRequest(
-  method: string,
   url: string,
-  data?: unknown | undefined,
+  options?: {
+    method?: string;
+    data?: unknown;
+    throwOnError?: boolean;
+  }
 ): Promise<Response> {
+  const method = options?.method || 'GET';
+  const data = options?.data;
+  const throwOnError = options?.throwOnError !== false;
+
   const res = await fetch(url, {
     method,
     headers: data ? { "Content-Type": "application/json" } : {},
@@ -19,7 +26,10 @@ export async function apiRequest(
     credentials: "include",
   });
 
-  await throwIfResNotOk(res);
+  if (throwOnError) {
+    await throwIfResNotOk(res);
+  }
+  
   return res;
 }
 

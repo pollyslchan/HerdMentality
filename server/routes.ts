@@ -5,7 +5,8 @@ import { storage } from "./storage";
 import { 
   insertGameSchema,
   insertPlayerSchema,
-  insertAnswerSchema
+  insertAnswerSchema,
+  type Game
 } from "@shared/schema";
 import { z } from "zod";
 import crypto from "crypto";

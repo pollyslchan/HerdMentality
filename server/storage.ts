@@ -142,7 +142,8 @@ export class MemStorage implements IStorage {
       id, 
       currentRound: 1,
       isComplete: false,
-      createdAt: new Date()
+      createdAt: new Date(),
+      gameCode: insertGame.gameCode || ""
     };
     this.games.set(id, game);
     return game;
