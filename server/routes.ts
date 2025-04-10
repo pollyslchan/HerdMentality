@@ -291,13 +291,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         
         // Handle game state updates
-        if (data.type === 'game_update' && gameCode) {
-          // Broadcast the update to all clients in this game
-          const connections = gameConnections.get(gameCode) || [];
+        if (data.type === 'game_update' && data.gameId) {
+          // First, if we don't have gameCode but have gameId, try to get it
+          if (!gameCode) {
+            const game = await storage.getGame(data.gameId);
+            if (game && game.gameCode) {
+              gameCode = game.gameCode;
+              gameId = data.gameId;
+              
+              // Add this connection to the game's connection pool if not already
+              if (!gameConnections.has(gameCode)) {
+                gameConnections.set(gameCode, []);
+              }
+              
+              if (!gameConnections.get(gameCode)?.includes(ws)) {
+                gameConnections.get(gameCode)?.push(ws);
+              }
+            }
+          }
           
-          for (const client of connections) {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify(data));
+          if (gameCode) {
+            // Broadcast the update to all clients in this game
+            const connections = gameConnections.get(gameCode) || [];
+            console.log(`Broadcasting game update to ${connections.length} clients for game ${gameCode}:`, data);
+            
+            for (const client of connections) {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify(data));
+              }
             }
           }
         }

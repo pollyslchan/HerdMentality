@@ -51,6 +51,43 @@ export default function SetupPage() {
     }
   }, []);
   
+  // Listen for WebSocket game updates
+  useEffect(() => {
+    // Determine the current game ID (either from joining or creating)
+    const currentGameId = existingGameId || gameId;
+    if (!currentGameId) return;
+    
+    // Set up WebSocket listener for game updates
+    const handleWebSocketMessage = (message: any) => {
+      if (message.type === 'game_update' && message.gameId === currentGameId) {
+        console.log('Received WebSocket game update:', message);
+        
+        const { data } = message;
+        
+        // Handle game start event
+        if (data?.action === 'game_started') {
+          console.log('Host started the game - all players should start');
+          startGame();
+        }
+        
+        // Handle player joined event
+        if (data?.action === 'player_joined') {
+          console.log('Player joined:', data.playerName);
+          refreshGameState();
+        }
+      }
+    };
+    
+    // Add listener and ensure WebSocket is connected
+    webSocket.connect();
+    webSocket.addMessageListener(handleWebSocketMessage);
+    
+    return () => {
+      // No explicit way to remove a specific listener in our implementation
+      // This is fine for our simple use case
+    };
+  }, [existingGameId, gameId, webSocket, refreshGameState, startGame]);
+  
   // Fetch game details for joining
   const fetchGameDetails = async (gameId: number) => {
     try {
@@ -184,7 +221,16 @@ export default function SetupPage() {
   };
   
   const handleLaunchGame = () => {
-    // Start the game when host decides all players have joined
+    // Get the current game ID
+    const currentGameId = gameId || existingGameId;
+    if (!currentGameId) return;
+    
+    // Send a WebSocket message to notify all players that the game is starting
+    webSocket.sendGameUpdate(currentGameId, {
+      action: 'game_started'
+    });
+    
+    // Start the game for the host as well
     startGame();
   };
   
