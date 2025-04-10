@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
 import { useGame } from '@/lib/gameContext';
 import { PlayerAvatar } from '@/components/PlayerAvatar';
 import { PLAYER_COLORS } from '@/lib/gameContext';
@@ -16,18 +17,24 @@ import type { GameWithDetails } from '@shared/schema';
 export default function SetupPage() {
   const [, setLocation] = useLocation();
   const [match, params] = useRoute('/setup');
-  const { createGame, addPlayer, startGame, loading } = useGame();
+  const { createGame, addPlayer, startGame, loading, gameId, refreshGameState, game } = useGame();
   const { toast } = useToast();
   const webSocket = useWebSocket();
   
+  // Joining game states
   const [isJoiningGame, setIsJoiningGame] = useState(false);
   const [existingGameId, setExistingGameId] = useState<number | null>(null);
   const [existingGameData, setExistingGameData] = useState<GameWithDetails | null>(null);
   const [playerName, setPlayerName] = useState('');
   
+  // Creating game states
   const [playerCount, setPlayerCount] = useState(4);
   const [roundCount, setRoundCount] = useState(8);
   const [playerNames, setPlayerNames] = useState<string[]>(Array(8).fill(''));
+  
+  // Waiting room states
+  const [showWaitingRoom, setShowWaitingRoom] = useState(false);
+  const [gameCode, setGameCode] = useState('');
   
   // Check if we're joining a game by URL parameter
   useEffect(() => {
@@ -129,25 +136,36 @@ export default function SetupPage() {
     }
   };
   
-  const handleStartGame = async () => {
+  const handleCreateGame = async () => {
     try {
       // Create the game
       const gameId = await createGame(roundCount);
       
-      // Add all players
-      for (let i = 0; i < playerCount; i++) {
-        const name = playerNames[i].trim() || `Player ${i + 1}`;
-        await addPlayer(name, i);
-      }
+      // Add the first player (host)
+      const hostName = playerNames[0].trim() || `Player 1`;
+      await addPlayer(hostName, 0);
       
       // Connect to WebSocket for this game
       webSocket.connect();
       webSocket.joinGame(gameId);
       
-      // Start the game
-      startGame();
+      // Fetch updated game details to get the game code
+      const response = await apiRequest(`/api/games/${gameId}`);
+      const gameData = await response.json();
+      setGameCode(gameData.gameCode);
+      
+      // Move to waiting room
+      setShowWaitingRoom(true);
+      
+      // Set up regular refreshes of the game state to see new players
+      const intervalId = setInterval(() => {
+        refreshGameState();
+      }, 2000);
+      
+      // Clean up the interval when the component unmounts
+      return () => clearInterval(intervalId);
     } catch (error) {
-      console.error('Failed to start game:', error);
+      console.error('Failed to create game:', error);
       toast({
         title: "Error",
         description: "Failed to create game. Please try again.",
@@ -156,16 +174,84 @@ export default function SetupPage() {
     }
   };
   
+  const handleLaunchGame = () => {
+    // Start the game when host decides all players have joined
+    startGame();
+  };
+  
   return (
     <section className="min-h-screen flex flex-col justify-center items-center p-4">
       <Card className="w-full max-w-md mx-auto shadow-lg rounded-2xl overflow-hidden">
         <CardContent className="p-8">
-          <h1 className="text-3xl font-bold font-sans text-primary mb-4">
-            {isJoiningGame ? 'Join Game' : 'Game Setup'}
-          </h1>
-          
-          {isJoiningGame ? (
+          {/* Waiting Room UI after creating a game */}
+          {showWaitingRoom ? (
             <>
+              <h1 className="text-3xl font-bold font-sans text-primary mb-4">Waiting Room</h1>
+              
+              <div className="mb-8">
+                <div className="bg-indigo-50 rounded-lg p-6 mb-6">
+                  <p className="font-medium text-gray-900 mb-2">Share this game code with your friends:</p>
+                  <p className="text-4xl font-bold text-primary tracking-wider text-center">{gameCode}</p>
+                </div>
+                
+                <div className="space-y-2 mb-6">
+                  <h3 className="text-lg font-medium text-gray-900">Players ({game?.players.length || 1} joined):</h3>
+                  <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                    {game?.players.map((player, index) => (
+                      <div key={player.id} className="flex items-center">
+                        <PlayerAvatar 
+                          number={index + 1} 
+                          color={player.color}
+                          size="sm"
+                        />
+                        <span className="ml-2 text-gray-900">{player.name}</span>
+                        {index === 0 && (
+                          <span className="ml-2 text-xs bg-primary text-white px-2 py-1 rounded-full">Host</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6">
+                  <div className="flex">
+                    <div className="ml-3">
+                      <h3 className="text-sm font-medium text-blue-800">Waiting for players</h3>
+                      <div className="mt-2 text-sm text-blue-700">
+                        <p>
+                          Players can join by entering the game code on the home screen.
+                          Start the game when everyone has joined.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-3">
+                  <Button 
+                    onClick={() => {
+                      setShowWaitingRoom(false);
+                      setLocation('/');
+                    }}
+                    variant="outline"
+                    className="flex-1 border border-primary text-primary font-medium py-3 px-6 rounded-full"
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={handleLaunchGame}
+                    disabled={loading || (game?.players.length || 0) < 2}
+                    className="flex-1 bg-primary hover:bg-indigo-700 text-white font-medium py-3 px-6 rounded-full"
+                  >
+                    {loading ? 'Starting...' : 'Start Game'}
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : isJoiningGame ? (
+            <>
+              <h1 className="text-3xl font-bold font-sans text-primary mb-4">Join Game</h1>
+              
               {existingGameData ? (
                 <div className="mb-6">
                   <div className="bg-indigo-50 rounded-lg p-4 mb-4">
@@ -230,6 +316,8 @@ export default function SetupPage() {
             </>
           ) : (
             <>
+              <h1 className="text-3xl font-bold font-sans text-primary mb-4">Game Setup</h1>
+              
               <div className="mb-6">
                 <Label htmlFor="num-players" className="block text-sm font-medium text-gray-900 mb-2">
                   Number of Players
@@ -276,23 +364,21 @@ export default function SetupPage() {
               </div>
               
               <div className="mb-8">
-                <h3 className="text-lg font-medium text-gray-900 mb-3">Player Names</h3>
+                <h3 className="text-lg font-medium text-gray-900 mb-3">Host Name</h3>
                 <div className="space-y-3">
-                  {Array.from({ length: playerCount }).map((_, index) => (
-                    <div key={index} className="flex items-center">
-                      <PlayerAvatar 
-                        number={index + 1} 
-                        color={PLAYER_COLORS[index % PLAYER_COLORS.length]}
-                      />
-                      <Input
-                        type="text"
-                        placeholder={`Player ${index + 1}`}
-                        value={playerNames[index]}
-                        onChange={(e) => handlePlayerNameChange(index, e.target.value)}
-                        className="flex-1 p-2 border rounded-lg ml-3"
-                      />
-                    </div>
-                  ))}
+                  <div className="flex items-center">
+                    <PlayerAvatar 
+                      number={1}
+                      color={PLAYER_COLORS[0]}
+                    />
+                    <Input
+                      type="text"
+                      placeholder="Your Name"
+                      value={playerNames[0]}
+                      onChange={(e) => handlePlayerNameChange(0, e.target.value)}
+                      className="flex-1 p-2 border rounded-lg ml-3"
+                    />
+                  </div>
                 </div>
               </div>
               
@@ -305,11 +391,11 @@ export default function SetupPage() {
                   Back
                 </Button>
                 <Button 
-                  onClick={handleStartGame}
-                  disabled={loading}
+                  onClick={handleCreateGame}
+                  disabled={loading || !playerNames[0].trim()}
                   className="flex-1 bg-primary hover:bg-indigo-700 text-white font-medium py-3 px-6 rounded-full"
                 >
-                  {loading ? 'Starting...' : 'Start Game'}
+                  {loading ? 'Creating...' : 'Create Game'}
                 </Button>
               </div>
             </>
