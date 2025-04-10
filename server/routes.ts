@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
+import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { 
   insertGameSchema,
@@ -7,13 +8,34 @@ import {
   insertAnswerSchema
 } from "@shared/schema";
 import { z } from "zod";
+import crypto from "crypto";
+
+// Function to generate a random 6-character game code
+function generateGameCode(): string {
+  return crypto.randomBytes(3).toString('hex').toUpperCase();
+}
+
+// Map to store active game connections
+const gameConnections: Map<string, WebSocket[]> = new Map();
+
+// WebSocket message types
+type WebSocketMessage = {
+  type: string;
+  gameId: number;
+  data?: any;
+};
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Games
   app.post("/api/games", async (req: Request, res: Response) => {
     try {
       const validatedData = insertGameSchema.parse(req.body);
-      const game = await storage.createGame(validatedData);
+      
+      // Generate a unique game code
+      const gameCode = generateGameCode();
+      const gameWithCode = { ...validatedData, gameCode };
+      
+      const game = await storage.createGame(gameWithCode);
       
       // Generate random questions for the game
       const questions = await storage.getRandomQuestions(game.totalRounds);
@@ -213,7 +235,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Add API endpoint to find a game by code
+  app.get("/api/games/code/:code", async (req: Request, res: Response) => {
+    try {
+      const code = req.params.code.toUpperCase();
+      
+      // Find game by code
+      const allGames = await storage.getAllGames();
+      const game = allGames.find((g: Game) => g.gameCode === code);
+      
+      if (!game) {
+        return res.status(404).json({ message: "Game not found with this code" });
+      }
+      
+      const gameWithDetails = await storage.getGameWithDetails(game.id);
+      res.json(gameWithDetails);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to find game by code" });
+    }
+  });
+
   // Create HTTP server
   const httpServer = createServer(app);
+  
+  // Set up WebSocket server
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  
+  // WebSocket connection handler
+  wss.on('connection', (ws: WebSocket) => {
+    let gameId: number | null = null;
+    let gameCode: string | null = null;
+    
+    ws.on('message', async (message: string) => {
+      try {
+        const data = JSON.parse(message) as WebSocketMessage;
+        
+        // Join a specific game room
+        if (data.type === 'join') {
+          gameId = data.gameId;
+          const game = await storage.getGame(gameId);
+          
+          if (game && game.gameCode) {
+            gameCode = game.gameCode;
+            
+            // Add this connection to the game's connection pool
+            if (!gameConnections.has(gameCode)) {
+              gameConnections.set(gameCode, []);
+            }
+            gameConnections.get(gameCode)?.push(ws);
+            
+            // Send confirmation
+            ws.send(JSON.stringify({ type: 'joined', gameId, success: true }));
+          }
+        }
+        
+        // Handle game state updates
+        if (data.type === 'game_update' && gameCode) {
+          // Broadcast the update to all clients in this game
+          const connections = gameConnections.get(gameCode) || [];
+          
+          for (const client of connections) {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify(data));
+            }
+          }
+        }
+      } catch (err) {
+        console.error('WebSocket message error:', err);
+      }
+    });
+    
+    // Handle disconnection
+    ws.on('close', () => {
+      if (gameCode && gameConnections.has(gameCode)) {
+        // Remove this connection from the game
+        const connections = gameConnections.get(gameCode) || [];
+        const index = connections.indexOf(ws);
+        
+        if (index !== -1) {
+          connections.splice(index, 1);
+        }
+        
+        // If no connections left for this game, remove the game entry
+        if (connections.length === 0) {
+          gameConnections.delete(gameCode);
+        }
+      }
+    });
+  });
+  
   return httpServer;
 }

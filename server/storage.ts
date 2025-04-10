@@ -17,6 +17,8 @@ export interface IStorage {
   // Game operations
   createGame(game: InsertGame): Promise<Game>;
   getGame(id: number): Promise<Game | undefined>;
+  getGameByCode(code: string): Promise<Game | undefined>;
+  getAllGames(): Promise<Game[]>;
   updateGame(id: number, updates: Partial<Game>): Promise<Game | undefined>;
   getGameWithDetails(id: number): Promise<GameWithDetails | undefined>;
   
@@ -148,6 +150,16 @@ export class MemStorage implements IStorage {
   
   async getGame(id: number): Promise<Game | undefined> {
     return this.games.get(id);
+  }
+  
+  async getGameByCode(code: string): Promise<Game | undefined> {
+    return Array.from(this.games.values()).find(
+      (game) => game.gameCode === code
+    );
+  }
+  
+  async getAllGames(): Promise<Game[]> {
+    return Array.from(this.games.values());
   }
   
   async updateGame(id: number, updates: Partial<Game>): Promise<Game | undefined> {

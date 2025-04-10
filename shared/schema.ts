@@ -22,10 +22,14 @@ export const games = pgTable("games", {
   currentRound: integer("current_round").notNull().default(1),
   isComplete: boolean("is_complete").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  gameCode: text("game_code").notNull().default(""),
 });
 
 export const insertGameSchema = createInsertSchema(games).pick({
   totalRounds: true,
+  gameCode: true,
+}).extend({
+  gameCode: z.string().optional(),
 });
 
 export type InsertGame = z.infer<typeof insertGameSchema>;
