@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useGame } from '@/lib/gameContext';
+import { useWebSocket } from '@/lib/websocketContext';
 import { PlayerAvatar } from '@/components/PlayerAvatar';
 
 export default function ResultsPage() {
@@ -13,13 +14,30 @@ export default function ResultsPage() {
     totalRounds,
     nextRound,
     loading,
-    refreshGameState
+    refreshGameState,
+    gameId
   } = useGame();
+  const webSocket = useWebSocket();
+  const [waitingForOthers, setWaitingForOthers] = useState(false);
   
   // Refresh game state when component mounts
   useEffect(() => {
     refreshGameState();
   }, [refreshGameState]);
+  
+  // Connect to WebSocket when component mounts
+  useEffect(() => {
+    if (!gameId) return;
+    
+    webSocket.connect();
+    webSocket.joinGame(gameId);
+    
+    // Cleanup on unmount
+    return () => {
+      // Only disconnect if navigating away from the game
+      // In real games, we would keep the connection across pages
+    };
+  }, [gameId, webSocket]);
   
   // If game isn't loaded yet, show loading state
   if (!game || !currentQuestion) {
@@ -97,11 +115,26 @@ export default function ResultsPage() {
           </div>
           
           <Button 
-            onClick={nextRound}
-            disabled={loading}
+            onClick={() => {
+              setWaitingForOthers(true);
+              nextRound();
+              // Notify other players via WebSocket
+              if (gameId) {
+                webSocket.sendGameUpdate(gameId, {
+                  action: 'next_round',
+                  currentRound: currentRound + 1
+                });
+              }
+            }}
+            disabled={loading || waitingForOthers}
             className="w-full bg-primary hover:bg-indigo-700 text-white font-medium py-3 px-6 rounded-full"
           >
-            {currentRound < totalRounds ? 'Next Round' : 'See Final Results'}
+            {waitingForOthers 
+              ? 'Moving to next round...' 
+              : currentRound < totalRounds 
+                ? 'Next Round' 
+                : 'See Final Results'
+            }
           </Button>
         </CardContent>
       </Card>

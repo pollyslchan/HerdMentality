@@ -18,13 +18,38 @@ export default function QuestionPage() {
     isTimerRunning,
     submitAnswer,
     processRoundAnswers,
-    hasEveryoneAnswered
+    hasEveryoneAnswered,
+    gameId,
+    refreshGameState
   } = useGame();
   
+  const webSocket = useWebSocket();
   const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
   const [answer, setAnswer] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const currentPlayer = players[currentPlayerIndex];
+  
+  // Connect to WebSocket when component mounts
+  useEffect(() => {
+    if (!gameId) return;
+    
+    webSocket.connect();
+    webSocket.joinGame(gameId);
+    
+    // Add message listener for real-time updates
+    const handleWebSocketMessage = (message: any) => {
+      if (message.type === 'game_update' && message.gameId === gameId) {
+        const { data } = message;
+        
+        if (data?.action === 'answer_submitted') {
+          refreshGameState();
+        }
+      }
+    };
+    
+    webSocket.addMessageListener(handleWebSocketMessage);
+  }, [gameId, webSocket, refreshGameState]);
   
   // Effect to auto-advance to next player after submitting an answer
   useEffect(() => {
@@ -45,10 +70,24 @@ export default function QuestionPage() {
   }, [hasEveryoneAnswered, players.length, processRoundAnswers]);
   
   const handleSubmitAnswer = async () => {
-    if (!currentPlayer || !answer.trim()) return;
+    if (!currentPlayer || !answer.trim() || isSubmitting) return;
     
-    await submitAnswer(currentPlayer.id, answer.trim());
-    setAnswer("");
+    setIsSubmitting(true);
+    try {
+      await submitAnswer(currentPlayer.id, answer.trim());
+      setAnswer("");
+      
+      // Notify other players via WebSocket
+      if (gameId) {
+        webSocket.sendGameUpdate(gameId, {
+          action: 'answer_submitted',
+          playerId: currentPlayer.id,
+          playerName: currentPlayer.name
+        });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
   
   // If game or current question isn't loaded yet, show loading state

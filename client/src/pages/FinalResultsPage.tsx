@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useGame } from '@/lib/gameContext';
 import { PlayerAvatar } from '@/components/PlayerAvatar';
+import { useWebSocket } from '@/lib/websocketContext';
 
 export default function FinalResultsPage() {
   const { 
@@ -10,8 +11,19 @@ export default function FinalResultsPage() {
     getWinner,
     resetGame,
     playAgain,
-    loading
+    loading,
+    gameId
   } = useGame();
+  const webSocket = useWebSocket();
+  const [isResetting, setIsResetting] = useState(false);
+  
+  // Connect to WebSocket when component mounts
+  useEffect(() => {
+    if (!gameId) return;
+    
+    webSocket.connect();
+    webSocket.joinGame(gameId);
+  }, [gameId, webSocket]);
   
   const winner = getWinner();
   
@@ -60,18 +72,27 @@ export default function FinalResultsPage() {
           <div className="flex space-x-3">
             <Button 
               onClick={playAgain}
-              disabled={loading}
+              disabled={loading || isResetting}
               variant="outline"
               className="flex-1 border border-primary text-primary font-medium py-3 px-6 rounded-full"
             >
               New Game
             </Button>
             <Button 
-              onClick={resetGame}
-              disabled={loading}
+              onClick={() => {
+                setIsResetting(true);
+                // Notify other players via WebSocket that the game is being reset
+                if (gameId) {
+                  webSocket.sendGameUpdate(gameId, {
+                    action: 'game_reset'
+                  });
+                }
+                resetGame();
+              }}
+              disabled={loading || isResetting}
               className="flex-1 bg-primary hover:bg-indigo-700 text-white font-medium py-3 px-6 rounded-full"
             >
-              Play Again
+              {isResetting ? 'Restarting...' : 'Play Again'}
             </Button>
           </div>
         </CardContent>
