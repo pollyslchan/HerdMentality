@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { TimerCircle } from '@/components/TimerCircle';
 import { PlayerAvatar } from '@/components/PlayerAvatar';
 import { useGame } from '@/lib/gameContext';
+import { useWebSocket } from '@/lib/websocketContext';
 
 export default function QuestionPage() {
   const { 
